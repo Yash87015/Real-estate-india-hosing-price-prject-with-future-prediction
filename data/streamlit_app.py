@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-import seaborn as sns
+
 
 st.set_page_config(layout="wide")
 
