@@ -2,9 +2,32 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import os
+import zipfile
 
 
 st.set_page_config(layout="wide")
+
+def extract_database_if_needed():
+    """Auto-extract database from zip if not already extracted"""
+    db_path = 'data/housing_data.db'
+    zip_path = 'housing_data.zip'
+    
+    # Check if we need to extract
+    if not os.path.exists(db_path) or os.path.getsize(db_path) < 1000000:
+        if os.path.exists(zip_path):
+            with st.spinner('Extracting database... This may take a moment'):
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall('data/')
+            st.success('Database extracted successfully!')
+
+# Auto-extract on app start
+extract_database_if_needed()
 
 @st.cache_data
 def load_data():
@@ -12,8 +35,9 @@ def load_data():
     Loads data from the SQLite database into two pandas DataFrames.
     The function is cached to improve performance.
     """
-    # Connect to the database, assuming it's in a 'data' subdirectory
-    conn = sqlite3.connect('data/housing_data.db') # MODIFIED PATH HERE
+    # Connect to the database
+    db_path = os.path.join(os.path.dirname(__file__), 'housing_data.db')
+    conn = sqlite3.connect(db_path)
     df_eda = pd.read_sql_query("SELECT * FROM eda_data", conn)
     df_ml = pd.read_sql_query("SELECT * FROM ml_data", conn)
     conn.close()
@@ -31,28 +55,6 @@ def load_data():
 #     st.write(df_ml.head())
 
 #     st.success("Data loaded successfully from SQLite database!")
-
-def eda_page():
-    st.title('EDA Page')
-    st.write('This is the EDA page.')
-
-def prediction_page():
-    st.title('Prediction Model (Coming Soon)')
-    st.write('This page will contain the prediction model.')
-
-
-def main():
-    st.sidebar.title('Navigation')
-    selected_page = st.sidebar.radio('Go to', ['EDA', 'Prediction Model'])
-
-    if selected_page == 'EDA':
-        eda_page()
-    elif selected_page == 'Prediction Model':
-        prediction_page()
-
-# Run the app
-if __name__ == '__main__':
-    main()
 
 def eda_page():
     st.title('Exploratory Data Analysis')
@@ -527,3 +529,16 @@ def eda_page():
 def prediction_page():
     st.title('Prediction Model - Coming Soon!')
     st.write('This page will contain the full prediction model, including user inputs and model outputs.')
+
+def main():
+    st.sidebar.title('Navigation')
+    selected_page = st.sidebar.radio('Go to', ['EDA', 'Prediction Model'])
+
+    if selected_page == 'EDA':
+        eda_page()
+    elif selected_page == 'Prediction Model':
+        prediction_page()
+
+# Run the app
+if __name__ == '__main__':
+    main()
