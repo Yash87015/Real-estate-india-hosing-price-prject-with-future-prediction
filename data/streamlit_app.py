@@ -9,6 +9,7 @@ import warnings
 warnings.filterwarnings('ignore')
 import numpy as np
 import os
+import joblib      # <--- Critical for loading models
 import zipfile
 
 
@@ -30,6 +31,46 @@ def load_data():
     conn.close()
     return df_eda, df_ml
 
+
+@st.cache_resource
+def load_models():
+    """
+    Loads models from the SAME folder as this script.
+    Handles unzipping regression_model.zip if the raw .joblib file isn't found.
+    """
+    # Get the folder where this script is located
+    base_path = os.path.dirname(os.path.abspath(__file__))
+
+    # Define paths relative to this script
+    clf_path = os.path.join(base_path, 'classification_model.joblib')
+    reg_path = os.path.join(base_path, 'regression_model.joblib')
+    zip_path = os.path.join(base_path, 'regression_model.zip')
+
+    # 1. Check & Unzip Regression Model if needed
+    if not os.path.exists(reg_path):
+        if os.path.exists(zip_path):
+            with st.spinner(f"Extracting model files..."):
+                try:
+                    # Extract specifically into the current folder (base_path)
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(base_path)
+                    st.success("Extraction Complete!")
+                except zipfile.BadZipFile:
+                    st.error("❌ The zip file is corrupted.")
+                    return None, None
+        else:
+            # If neither the .joblib nor the .zip exists
+            st.error(f"❌ Files missing! Looked for '{reg_path}' or '{zip_path}'.")
+            return None, None
+
+    # 2. Load Models
+    try:
+        clf_model = joblib.load(clf_path)
+        reg_model = joblib.load(reg_path)
+        return clf_model, reg_model
+    except Exception as e:
+        st.error(f"❌ Error loading models: {e}")
+        return None, None
 # Example of how to use the loaded data in a Streamlit app
 # if __name__ == "__main__":
 #     st.title("Housing Price Analysis App")
@@ -514,8 +555,138 @@ def eda_page():
     st.pyplot(fig_avail_status)
 
 def prediction_page():
-    st.title('Prediction Model - Coming Soon!')
-    st.write('This page will contain the full prediction model, including user inputs and model outputs.')
+    st.title('🏡 AI Real Estate Advisor')
+    st.markdown("### Predict Property Value & Investment Potential")
+
+    # 1. Load Models & Data
+    # We use the load_models function we defined earlier
+    clf_model, reg_model = load_models()
+    
+    # We reuse load_data to get the City names for the dropdown
+    df_eda, _ = load_data() 
+
+    # Check if models loaded successfully
+    if clf_model is None or reg_model is None:
+        st.error("⚠️ Model files not found! Please check if .joblib or .zip files are in the data folder.")
+        return
+
+    # 2. User Input Form
+    with st.form("prediction_form"):
+        st.subheader("1. Location Details")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Get unique cities from your database for the dropdown
+            if not df_eda.empty:
+                cities = sorted(df_eda['City'].unique())
+                selected_city = st.selectbox("Select City", cities)
+            else:
+                selected_city = st.selectbox("Select City", ['Mumbai', 'Bangalore', 'Delhi', 'Pune'])
+        
+        with col2:
+            # Simple static list for now, or you could filter localities based on city if you implemented that logic
+            st.info("Locality selection is simplified for this demo.")
+            selected_locality = "Locality_0" # Dummy placeholder
+
+        st.subheader("2. Property Specs")
+        col3, col4, col5 = st.columns(3)
+        
+        with col3:
+            bhk = st.slider("BHK (Bedrooms)", 1, 6, 2)
+        with col4:
+            size = st.number_input("Size (SqFt)", 300, 10000, 1000)
+        with col5:
+            price = st.number_input("Current Price (Lakhs)", 5.0, 1000.0, 65.0)
+
+        st.subheader("3. Features & Amenities")
+        col6, col7 = st.columns(2)
+        
+        with col6:
+            amenities_score = st.slider("Amenities Score (How many amenities?)", 0, 15, 5, help="Gym, Pool, Club, etc.")
+            
+        with col7:
+            status_option = st.radio("Availability Status", ["Ready to Move", "Under Construction"], horizontal=True)
+
+        # Advanced inputs (Hidden inside expander to keep UI clean)
+        with st.expander("Show Advanced Inputs (Optional)"):
+            floor = st.number_input("Floor Number", 0, 50, 4)
+            age = st.number_input("Property Age (Years)", 0, 50, 2)
+        
+        # Submit Button
+        submit_btn = st.form_submit_button("Analyze Property 🚀")
+
+    # 3. Prediction Logic (Triggered on Click)
+    if submit_btn:
+        # A. Pre-process Inputs
+        # Calculate Price per SqFt (Critical Feature)
+        price_per_sqft = (price * 100000) / size
+        
+        # Encode Availability (1 = Ready, 0 = Under Construction)
+        availability_val = 1 if status_option == "Ready to Move" else 0
+        
+        # B. Prepare Data Row (Matching Training Columns)
+        # We use 0 for ID columns (State, City, Locality) because our analysis showed they have low feature importance compared to Price/SqFt
+        input_data = pd.DataFrame({
+            'State': [0], 
+            'City': [0],  
+            'Locality': [0], 
+            'BHK': [bhk],
+            'Size_in_SqFt': [size],
+            'Price_in_Lakhs': [price],
+            'Price_per_SqFt': [price_per_sqft], # KEY DRIVER
+            'Furnished_Status': [0], 
+            'Floor_No': [floor],
+            'Total_Floors': [10], # Default
+            'Age_of_Property': [age],
+            'Nearby_Schools': [3], # Default avg
+            'Nearby_Hospitals': [2], # Default avg
+            'Public_Transport_Accessibility': [0],
+            'Parking_Space': [0],
+            'Security': [0],
+            'Facing': [0],
+            'Owner_Type': [0],
+            'Availability_Status': [availability_val], # KEY DRIVER
+            'Amenities_Score': [amenities_score],
+            'Property_Type_Independent House': [0],
+            'Property_Type_Villa': [0]
+        })
+
+        # C. Predict using the loaded models
+        try:
+            # Classification: Is it a good investment?
+            pred_class = clf_model.predict(input_data)[0]
+            prob = clf_model.predict_proba(input_data)[0][1]
+            
+            # Regression: What will be the price in 5 years?
+            future_price = reg_model.predict(input_data)[0]
+            roi = ((future_price - price) / price) * 100
+
+            # D. Show Results
+            st.divider()
+            r_col1, r_col2 = st.columns(2)
+
+            with r_col1:
+                st.subheader("💡 Investment Verdict")
+                if pred_class == 1:
+                    st.success(f"**🟢 GOOD INVESTMENT**")
+                    st.markdown(f"**Confidence:** {prob*100:.1f}%")
+                    st.caption("Matches criteria: Competitive Price/SqFt & High Demand Features")
+                else:
+                    st.error(f"**🔴 RISKY / OVERPRICED**")
+                    st.markdown(f"**Risk Score:** {(1-prob)*100:.1f}%")
+                    st.caption("Price might be too high for this size/area.")
+
+            with r_col2:
+                st.subheader("📈 Financial Projection")
+                st.metric("Estimated Price (5 Years)", f"₹ {future_price:.2f} L", delta=f"{roi:.1f}% ROI")
+                
+                # Simple Plot
+                chart_df = pd.DataFrame({'Year': ['2025', '2030'], 'Value': [price, future_price]})
+                st.bar_chart(chart_df.set_index('Year'))
+
+        except Exception as e:
+            st.error(f"Prediction Error: {e}")
+            st.info("Check if the input columns match exactly with the training data.")
 
 def main():
     st.sidebar.title('Navigation')
