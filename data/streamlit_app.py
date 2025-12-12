@@ -648,7 +648,7 @@ def prediction_page():
             'Availability_Status': [availability_val], # KEY DRIVER
             'Amenities_Score': [amenities_score],
             'Property_Type_Independent House': [0],
-            'Property_Type_Villa': [0]
+            'Property_Type_Villa': [0],
             'Predicted_Investment_Status': [0]
         })
 
