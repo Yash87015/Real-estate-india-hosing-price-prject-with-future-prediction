@@ -1,11 +1,12 @@
 
+
 import streamlit as st
 import pandas as pd
-import sqlite3
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
+import sqlite3 as sql
 import matplotlib.pyplot as plt
 import seaborn as sns
+import warnings
+warnings.filterwarnings('ignore')
 import numpy as np
 import os
 import zipfile
