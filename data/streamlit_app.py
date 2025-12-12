@@ -554,6 +554,7 @@ def eda_page():
     plt.tight_layout()
     st.pyplot(fig_avail_status)
 
+
 def prediction_page():
     st.title('🏡 AI Real Estate Advisor')
     st.markdown("### Predict Property Value & Investment Potential")
@@ -572,7 +573,6 @@ def prediction_page():
         col1, col2 = st.columns(2)
         
         with col1:
-            # Dropdown for City
             if not df_eda.empty:
                 cities = sorted(df_eda['City'].unique())
                 selected_city = st.selectbox("Select City", cities)
@@ -581,7 +581,7 @@ def prediction_page():
         
         with col2:
             st.info("Locality selection simplified.")
-            selected_locality = "Locality_0" # Placeholder
+            selected_locality = "Locality_0" 
 
         st.subheader("2. Property Specs")
         col3, col4, col5 = st.columns(3)
@@ -607,34 +607,18 @@ def prediction_page():
 
     # 3. Prediction Logic
     if submit_btn:
-        # --- A. Calculate Missing 'Investment_Score' ---
-        # 1. Calculate Price per SqFt
+        # A. Calculation
         price_per_sqft = (price * 100000) / size
         availability_val = 1 if status_option == "Ready to Move" else 0
 
-        # 2. Estimate Locality Median (using City median as fallback since we don't have locality logic in UI)
-        if not df_eda.empty:
-            city_median = df_eda[df_eda['City'] == selected_city]['Price_per_SqFt'].median()
-        else:
-            city_median = 5000 # Fallback
-
-        # 3. Recreate the Score Logic (Matches your training logic)
-        # Score = (Price <= Median * 2) + (BHK >= 3) + (Ready)
-        score_val = 0
-        if price_per_sqft <= city_median:
-            score_val += 2
-        if bhk >= 3:
-            score_val += 1
-        if availability_val == 1:
-            score_val += 1
-        
-        # --- B. Prepare Input DataFrame ---
-        input_data = pd.DataFrame({
+        # B. Prepare Complete Input DataFrame
+        # We include ALL columns here first
+        full_input_data = pd.DataFrame({
             'State': [0], 'City': [0], 'Locality': [0], 
             'BHK': [bhk], 
             'Size_in_SqFt': [size], 
-            'Price_in_Lakhs': [price],        # Regressor might need this
-            'Price_per_SqFt': [price_per_sqft], # Regressor might need this
+            'Price_in_Lakhs': [price],           # Model WANTS this
+            'Price_per_SqFt': [price_per_sqft],  # Model WANTS this
             'Furnished_Status': [0], 'Floor_No': [floor], 
             'Total_Floors': [10], 'Age_of_Property': [age],
             'Nearby_Schools': [3], 'Nearby_Hospitals': [2], 
@@ -643,30 +627,27 @@ def prediction_page():
             'Availability_Status': [availability_val], 
             'Amenities_Score': [amenities_score],
             'Property_Type_Independent House': [0], 'Property_Type_Villa': [0],
+            # We add these just in case, but will likely drop them
             'Predicted_Investment_Status': [0],
-            'Investment_Score': [score_val]   # <--- ADDED THIS
+            'Investment_Score': [0] 
         })
 
         try:
-            # --- C. CLASSIFICATION FIX ---
-            # The Classifier hates 'Price_in_Lakhs' and 'Price_per_SqFt' but wants 'Investment_Score'
-            # We create a specific input view for the classifier
-            clf_cols_to_drop = ['Price_in_Lakhs', 'Price_per_SqFt']
-            # Only drop if they exist in the dataframe
-            clf_input = input_data.drop(columns=[c for c in clf_cols_to_drop if c in input_data.columns])
+            # --- C. COLUMN CLEANUP (The Fix) ---
+            # 1. Drop columns that the model said were "Unseen"
+            # The error said "Investment_Score" is unseen, so we DROP it.
+            # We also drop "Predicted_Investment_Status" to be safe.
+            cols_to_drop = ['Investment_Score', 'Predicted_Investment_Status']
+            final_input = full_input_data.drop(columns=[c for c in cols_to_drop if c in full_input_data.columns])
+
+            # 2. Predict (Using the clean input with Price columns included)
+            pred_class = clf_model.predict(final_input)[0]
+            prob = clf_model.predict_proba(final_input)[0][1]
             
-            pred_class = clf_model.predict(clf_input)[0]
-            prob = clf_model.predict_proba(clf_input)[0][1]
-            
-            # --- D. REGRESSION FIX ---
-            # The Regressor usually NEEDS Price columns. We pass the full input_data.
-            # If Regressor throws error about 'Investment_Score', we drop it here.
-            reg_input = input_data.drop(columns=['Investment_Score', 'Predicted_Investment_Status'])
-            future_price = reg_model.predict(reg_input)[0]
-            
+            future_price = reg_model.predict(final_input)[0]
             roi = ((future_price - price) / price) * 100
 
-            # Show Results
+            # D. Show Results
             st.divider()
             col1, col2 = st.columns(2)
             with col1:
@@ -682,8 +663,8 @@ def prediction_page():
 
         except Exception as e:
             st.error(f"Prediction Error: {e}")
-            st.warning("Ensure the .joblib models match the columns created in the code.")
-
+            # If it fails again, this print will help debug exactly what columns remain
+            st.write("Columns sent to model:", final_input.columns.tolist())
 def main():
     st.sidebar.title('Navigation')
     selected_page = st.sidebar.radio('Go to', ['EDA', 'Prediction Model'])
