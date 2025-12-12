@@ -2,8 +2,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-import matplotlib.pyplot as plt
-import seaborn as sns
+
 
 st.set_page_config(layout="wide")
 
