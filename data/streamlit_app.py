@@ -554,7 +554,6 @@ def eda_page():
     plt.tight_layout()
     st.pyplot(fig_avail_status)
 
-
 def prediction_page():
     st.title('🏡 AI Real Estate Advisor')
     st.markdown("### Predict Property Value & Investment Potential")
@@ -567,18 +566,51 @@ def prediction_page():
         st.error("⚠️ Model files not found! Please check .joblib or .zip files.")
         return
 
+    # --- HELPER: Smart Alignment Function ---
+    def align_data_and_predict(model, raw_input_df):
+        """
+        Automatically aligns input DataFrame columns to match 
+        exactly what the model expects.
+        """
+        # Check if model has feature names saved
+        if not hasattr(model, 'feature_names_in_'):
+            return model.predict(raw_input_df)[0], None
+
+        # Get the exact list of columns the model wants
+        expected_cols = model.feature_names_in_
+        aligned_df = raw_input_df.copy()
+
+        # A. Add Missing Columns (Set to 0)
+        # This fixes 'Feature names seen at fit time, yet now missing'
+        for col in expected_cols:
+            if col not in aligned_df.columns:
+                aligned_df[col] = 0  # Fill with dummy value
+        
+        # B. Drop Extra Columns
+        # This fixes 'Feature names unseen at fit time'
+        aligned_df = aligned_df[expected_cols]
+
+        # Predict
+        prediction = model.predict(aligned_df)[0]
+        
+        # Get probability if it's a classifier
+        if hasattr(model, 'predict_proba'):
+            prob = model.predict_proba(aligned_df)[0][1]
+            return prediction, prob
+        else:
+            return prediction, None
+    # ----------------------------------------
+
     # 2. User Input Form
     with st.form("prediction_form"):
         st.subheader("1. Location Details")
         col1, col2 = st.columns(2)
-        
         with col1:
             if not df_eda.empty:
                 cities = sorted(df_eda['City'].unique())
                 selected_city = st.selectbox("Select City", cities)
             else:
                 selected_city = st.selectbox("Select City", ['Mumbai', 'Bangalore', 'Delhi', 'Pune'])
-        
         with col2:
             st.info("Locality selection simplified.")
             selected_locality = "Locality_0" 
@@ -607,18 +639,25 @@ def prediction_page():
 
     # 3. Prediction Logic
     if submit_btn:
-        # A. Calculation
+        # A. Calculate Inputs
         price_per_sqft = (price * 100000) / size
         availability_val = 1 if status_option == "Ready to Move" else 0
+        
+        # Calculate Logic-Based Investment Score (Recalculating it here just in case model needs it)
+        # Score = (Price <= Median * 2) + (BHK >= 3) + (Ready)
+        # Using simple threshold 6000 since we don't have live median
+        score_val = 0
+        if price_per_sqft <= 6000: score_val += 2
+        if bhk >= 3: score_val += 1
+        if availability_val == 1: score_val += 1
 
-        # B. Prepare Complete Input DataFrame
-        # We include ALL columns here first
-        full_input_data = pd.DataFrame({
+        # B. Prepare Raw DataFrame with ALL potential columns
+        input_data = pd.DataFrame({
             'State': [0], 'City': [0], 'Locality': [0], 
             'BHK': [bhk], 
             'Size_in_SqFt': [size], 
-            'Price_in_Lakhs': [price],           # Model WANTS this
-            'Price_per_SqFt': [price_per_sqft],  # Model WANTS this
+            'Price_in_Lakhs': [price],           
+            'Price_per_SqFt': [price_per_sqft],  
             'Furnished_Status': [0], 'Floor_No': [floor], 
             'Total_Floors': [10], 'Age_of_Property': [age],
             'Nearby_Schools': [3], 'Nearby_Hospitals': [2], 
@@ -627,24 +666,17 @@ def prediction_page():
             'Availability_Status': [availability_val], 
             'Amenities_Score': [amenities_score],
             'Property_Type_Independent House': [0], 'Property_Type_Villa': [0],
-            # We add these just in case, but will likely drop them
-            'Predicted_Investment_Status': [0],
-            'Investment_Score': [0] 
+            # Add the troublemakers
+            'Predicted_Investment_Status': [0], 
+            'Investment_Score': [score_val]
         })
 
         try:
-            # --- C. COLUMN CLEANUP (The Fix) ---
-            # 1. Drop columns that the model said were "Unseen"
-            # The error said "Investment_Score" is unseen, so we DROP it.
-            # We also drop "Predicted_Investment_Status" to be safe.
-            cols_to_drop = ['Investment_Score', 'Predicted_Investment_Status']
-            final_input = full_input_data.drop(columns=[c for c in cols_to_drop if c in full_input_data.columns])
-
-            # 2. Predict (Using the clean input with Price columns included)
-            pred_class = clf_model.predict(final_input)[0]
-            prob = clf_model.predict_proba(final_input)[0][1]
+            # --- C. PREDICT USING SMART ALIGNMENT ---
+            # This function automatically filters columns to match YOUR specific .pkl files
+            pred_class, prob = align_data_and_predict(clf_model, input_data)
+            future_price, _ = align_data_and_predict(reg_model, input_data)
             
-            future_price = reg_model.predict(final_input)[0]
             roi = ((future_price - price) / price) * 100
 
             # D. Show Results
@@ -653,18 +685,25 @@ def prediction_page():
             with col1:
                 st.subheader("Verdict")
                 if pred_class == 1:
-                    st.success(f"🟢 GOOD INVESTMENT ({prob*100:.0f}%)")
+                    st.success(f"🟢 GOOD INVESTMENT")
+                    st.caption(f"Confidence: {prob*100:.0f}%")
                 else:
-                    st.error(f"🔴 RISKY / AVOID ({prob*100:.0f}%)")
+                    st.error(f"🔴 RISKY / AVOID")
+                    st.caption(f"Risk Confidence: {(1-prob)*100:.0f}%")
             
             with col2:
                 st.subheader("Projection")
                 st.metric("5-Year Value", f"₹ {future_price:.2f} L", f"{roi:.1f}%")
+                
+                # Visual
+                chart_df = pd.DataFrame({'Year': ['2025', '2030'], 'Value': [price, future_price]})
+                st.bar_chart(chart_df.set_index('Year'))
 
         except Exception as e:
             st.error(f"Prediction Error: {e}")
-            # If it fails again, this print will help debug exactly what columns remain
-            st.write("Columns sent to model:", final_input.columns.tolist())
+            st.write("Input Data Columns:", input_data.columns.tolist())
+
+
 def main():
     st.sidebar.title('Navigation')
     selected_page = st.sidebar.radio('Go to', ['EDA', 'Prediction Model'])
