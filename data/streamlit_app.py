@@ -559,15 +559,11 @@ def prediction_page():
     st.markdown("### Predict Property Value & Investment Potential")
 
     # 1. Load Models & Data
-    # We use the load_models function we defined earlier
     clf_model, reg_model = load_models()
-    
-    # We reuse load_data to get the City names for the dropdown
-    df_eda, _ = load_data() 
+    df_eda, _ = load_data()
 
-    # Check if models loaded successfully
     if clf_model is None or reg_model is None:
-        st.error("⚠️ Model files not found! Please check if .joblib or .zip files are in the data folder.")
+        st.error("⚠️ Model files not found! Please check .joblib or .zip files.")
         return
 
     # 2. User Input Form
@@ -576,7 +572,7 @@ def prediction_page():
         col1, col2 = st.columns(2)
         
         with col1:
-            # Get unique cities from your database for the dropdown
+            # Dropdown for City
             if not df_eda.empty:
                 cities = sorted(df_eda['City'].unique())
                 selected_city = st.selectbox("Select City", cities)
@@ -584,110 +580,109 @@ def prediction_page():
                 selected_city = st.selectbox("Select City", ['Mumbai', 'Bangalore', 'Delhi', 'Pune'])
         
         with col2:
-            # Simple static list for now, or you could filter localities based on city if you implemented that logic
-            st.info("Locality selection is simplified for this demo.")
-            selected_locality = "Locality_0" # Dummy placeholder
+            st.info("Locality selection simplified.")
+            selected_locality = "Locality_0" # Placeholder
 
         st.subheader("2. Property Specs")
         col3, col4, col5 = st.columns(3)
-        
         with col3:
-            bhk = st.slider("BHK (Bedrooms)", 1, 6, 2)
+            bhk = st.slider("BHK", 1, 6, 2)
         with col4:
             size = st.number_input("Size (SqFt)", 300, 10000, 1000)
         with col5:
-            price = st.number_input("Current Price (Lakhs)", 5.0, 1000.0, 65.0)
+            price = st.number_input("Price (Lakhs)", 5.0, 1000.0, 65.0)
 
-        st.subheader("3. Features & Amenities")
+        st.subheader("3. Features")
         col6, col7 = st.columns(2)
-        
         with col6:
-            amenities_score = st.slider("Amenities Score (How many amenities?)", 0, 15, 5, help="Gym, Pool, Club, etc.")
-            
+            amenities_score = st.slider("Amenities Score", 0, 15, 5)
         with col7:
-            status_option = st.radio("Availability Status", ["Ready to Move", "Under Construction"], horizontal=True)
+            status_option = st.radio("Status", ["Ready to Move", "Under Construction"], horizontal=True)
 
-        # Advanced inputs (Hidden inside expander to keep UI clean)
-        with st.expander("Show Advanced Inputs (Optional)"):
-            floor = st.number_input("Floor Number", 0, 50, 4)
-            age = st.number_input("Property Age (Years)", 0, 50, 2)
+        with st.expander("Advanced Inputs"):
+            floor = st.number_input("Floor", 0, 50, 4)
+            age = st.number_input("Age (Years)", 0, 50, 2)
         
-        # Submit Button
         submit_btn = st.form_submit_button("Analyze Property 🚀")
 
-    # 3. Prediction Logic (Triggered on Click)
+    # 3. Prediction Logic
     if submit_btn:
-        # A. Pre-process Inputs
-        # Calculate Price per SqFt (Critical Feature)
+        # --- A. Calculate Missing 'Investment_Score' ---
+        # 1. Calculate Price per SqFt
         price_per_sqft = (price * 100000) / size
-        
-        # Encode Availability (1 = Ready, 0 = Under Construction)
         availability_val = 1 if status_option == "Ready to Move" else 0
+
+        # 2. Estimate Locality Median (using City median as fallback since we don't have locality logic in UI)
+        if not df_eda.empty:
+            city_median = df_eda[df_eda['City'] == selected_city]['Price_per_SqFt'].median()
+        else:
+            city_median = 5000 # Fallback
+
+        # 3. Recreate the Score Logic (Matches your training logic)
+        # Score = (Price <= Median * 2) + (BHK >= 3) + (Ready)
+        score_val = 0
+        if price_per_sqft <= city_median:
+            score_val += 2
+        if bhk >= 3:
+            score_val += 1
+        if availability_val == 1:
+            score_val += 1
         
-        # B. Prepare Data Row (Matching Training Columns)
-        # We use 0 for ID columns (State, City, Locality) because our analysis showed they have low feature importance compared to Price/SqFt
+        # --- B. Prepare Input DataFrame ---
         input_data = pd.DataFrame({
-            'State': [0], 
-            'City': [0],  
-            'Locality': [0], 
-            'BHK': [bhk],
-            'Size_in_SqFt': [size],
-            'Price_in_Lakhs': [price],
-            'Price_per_SqFt': [price_per_sqft], # KEY DRIVER
-            'Furnished_Status': [0], 
-            'Floor_No': [floor],
-            'Total_Floors': [10], # Default
-            'Age_of_Property': [age],
-            'Nearby_Schools': [3], # Default avg
-            'Nearby_Hospitals': [2], # Default avg
-            'Public_Transport_Accessibility': [0],
-            'Parking_Space': [0],
-            'Security': [0],
-            'Facing': [0],
-            'Owner_Type': [0],
-            'Availability_Status': [availability_val], # KEY DRIVER
+            'State': [0], 'City': [0], 'Locality': [0], 
+            'BHK': [bhk], 
+            'Size_in_SqFt': [size], 
+            'Price_in_Lakhs': [price],        # Regressor might need this
+            'Price_per_SqFt': [price_per_sqft], # Regressor might need this
+            'Furnished_Status': [0], 'Floor_No': [floor], 
+            'Total_Floors': [10], 'Age_of_Property': [age],
+            'Nearby_Schools': [3], 'Nearby_Hospitals': [2], 
+            'Public_Transport_Accessibility': [0], 'Parking_Space': [0], 
+            'Security': [0], 'Facing': [0], 'Owner_Type': [0], 
+            'Availability_Status': [availability_val], 
             'Amenities_Score': [amenities_score],
-            'Property_Type_Independent House': [0],
-            'Property_Type_Villa': [0],
-            'Predicted_Investment_Status': [0]
+            'Property_Type_Independent House': [0], 'Property_Type_Villa': [0],
+            'Predicted_Investment_Status': [0],
+            'Investment_Score': [score_val]   # <--- ADDED THIS
         })
 
-        # C. Predict using the loaded models
         try:
-            # Classification: Is it a good investment?
-            pred_class = clf_model.predict(input_data)[0]
-            prob = clf_model.predict_proba(input_data)[0][1]
+            # --- C. CLASSIFICATION FIX ---
+            # The Classifier hates 'Price_in_Lakhs' and 'Price_per_SqFt' but wants 'Investment_Score'
+            # We create a specific input view for the classifier
+            clf_cols_to_drop = ['Price_in_Lakhs', 'Price_per_SqFt']
+            # Only drop if they exist in the dataframe
+            clf_input = input_data.drop(columns=[c for c in clf_cols_to_drop if c in input_data.columns])
             
-            # Regression: What will be the price in 5 years?
-            future_price = reg_model.predict(input_data)[0]
+            pred_class = clf_model.predict(clf_input)[0]
+            prob = clf_model.predict_proba(clf_input)[0][1]
+            
+            # --- D. REGRESSION FIX ---
+            # The Regressor usually NEEDS Price columns. We pass the full input_data.
+            # If Regressor throws error about 'Investment_Score', we drop it here.
+            reg_input = input_data.drop(columns=['Investment_Score', 'Predicted_Investment_Status'])
+            future_price = reg_model.predict(reg_input)[0]
+            
             roi = ((future_price - price) / price) * 100
 
-            # D. Show Results
+            # Show Results
             st.divider()
-            r_col1, r_col2 = st.columns(2)
-
-            with r_col1:
-                st.subheader("💡 Investment Verdict")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Verdict")
                 if pred_class == 1:
-                    st.success(f"**🟢 GOOD INVESTMENT**")
-                    st.markdown(f"**Confidence:** {prob*100:.1f}%")
-                    st.caption("Matches criteria: Competitive Price/SqFt & High Demand Features")
+                    st.success(f"🟢 GOOD INVESTMENT ({prob*100:.0f}%)")
                 else:
-                    st.error(f"**🔴 RISKY / OVERPRICED**")
-                    st.markdown(f"**Risk Score:** {(1-prob)*100:.1f}%")
-                    st.caption("Price might be too high for this size/area.")
-
-            with r_col2:
-                st.subheader("📈 Financial Projection")
-                st.metric("Estimated Price (5 Years)", f"₹ {future_price:.2f} L", delta=f"{roi:.1f}% ROI")
-                
-                # Simple Plot
-                chart_df = pd.DataFrame({'Year': ['2025', '2030'], 'Value': [price, future_price]})
-                st.bar_chart(chart_df.set_index('Year'))
+                    st.error(f"🔴 RISKY / AVOID ({prob*100:.0f}%)")
+            
+            with col2:
+                st.subheader("Projection")
+                st.metric("5-Year Value", f"₹ {future_price:.2f} L", f"{roi:.1f}%")
 
         except Exception as e:
             st.error(f"Prediction Error: {e}")
-            st.info("Check if the input columns match exactly with the training data.")
+            st.warning("Ensure the .joblib models match the columns created in the code.")
 
 def main():
     st.sidebar.title('Navigation')
