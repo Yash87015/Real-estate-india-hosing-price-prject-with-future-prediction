@@ -649,6 +649,7 @@ def prediction_page():
             'Amenities_Score': [amenities_score],
             'Property_Type_Independent House': [0],
             'Property_Type_Villa': [0]
+            'Predicted_Investment_Status': [0]
         })
 
         # C. Predict using the loaded models
