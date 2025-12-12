@@ -14,21 +14,7 @@ import zipfile
 
 st.set_page_config(layout="wide")
 
-def extract_database_if_needed():
-    """Auto-extract database from zip if not already extracted"""
-    db_path = 'data/housing_data.db'
-    zip_path = 'housing_data.zip'
-    
-    # Check if we need to extract
-    if not os.path.exists(db_path) or os.path.getsize(db_path) < 1000000:
-        if os.path.exists(zip_path):
-            with st.spinner('Extracting database... This may take a moment'):
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall('data/')
-            st.success('Database extracted successfully!')
 
-# Auto-extract on app start
-extract_database_if_needed()
 
 @st.cache_data
 def load_data():
