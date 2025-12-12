@@ -24,7 +24,7 @@ def load_data():
     """
     # Connect to the database
     db_path = os.path.join(os.path.dirname(__file__), 'housing_data.db')
-    conn = sqlite3.connect(db_path)
+    conn = sql.connect(db_path)
     df_eda = pd.read_sql_query("SELECT * FROM eda_data", conn)
     df_ml = pd.read_sql_query("SELECT * FROM ml_data", conn)
     conn.close()
